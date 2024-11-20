@@ -41,7 +41,6 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
     private static final String PLUGIN_NAME = "hzhuAi Plugin";
     private static final String LLM_ENDPOINT = "http://43.156.23.54:6004/sse2?conversationId=%s";  // 只保留你给出的API
     private static final Logger logger = LoggerFactory.getLogger(hzhuAiPlugin.class);
-    private JMenuItem renameMenuItem;
 
     private static final String DEFAULT_PROMPT_TEMPLATE = """
         你是一个 Java 代码分析专家，请分析以下代码，并为混淆后的类名、方法名、变量名、参数名提供新的描述性名称，以及加上详细的注释。
@@ -80,7 +79,6 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
         }
         代码：
         """;
-    private JadxPluginContext context;
     private JadxGuiContext guiContext;
     private String conversationId;
     private JadxDecompiler decompiler;
@@ -96,35 +94,15 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
     }
     @Override
     public void init(JadxPluginContext context) {
-        this.context = context;
         if (context.getGuiContext() != null) {
             this.guiContext = context.getGuiContext();
             this.decompiler =context.getDecompiler();
             initializeGUIComponents();
         }
     }
-    
-    private void initializeGUIComponents() {
-        renameMenuItem = new JMenuItem("用AI去混淆");
-        renameMenuItem.addActionListener(e -> {
-            try {
-                ICodeNodeRef node = guiContext.getEnclosingNodeUnderCaret();
-                if (node != null) {
-                    JavaNode javaNode = decompiler.getJavaNodeByRef(node);
-                    if (javaNode instanceof JavaClass) {
-                        analyzeCode((JavaClass) javaNode);
-                    } else {
-                        showError("请将光标置于类内进行分析");
-                    }
-                } else {
-                    showError("请将光标置于代码块内进行分析");
-                }
-            } catch (Exception ex) {
-                handleError("获取代码失败", ex);
-            }
-        });
 
-       // 使用 addPopupMenuAction 方法添加一个动态启用的菜单项
+    private void initializeGUIComponents() {
+        // 使用 addPopupMenuAction 方法添加一个动态启用的菜单项
         guiContext.addPopupMenuAction("AI去混淆", (node) -> {
             if (node != null) {
                 JavaNode javaNode = decompiler.getJavaNodeByRef(node);
@@ -185,47 +163,47 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
         }
         // Set the version (4) and variant (8, 9, A, or B) bits according to RFC 4122
         uuid[14] = '4';
-        uuid[19] |= (RANDOM.nextInt(4) << 3) | 0x8;
+        uuid[19] |= (char) ((RANDOM.nextInt(4) << 3) | 0x8);
         return new String(uuid);
     }
 
 
 
     private String sendLLMRequest(String prompt) throws IOException, InterruptedException {
-    try {
-        if (conversationId == null || conversationId.isEmpty()) {
-            conversationId = generateSHA256HashFromJadx();
-        }
-        String endpoint = String.format(LLM_ENDPOINT, conversationId);
-        JsonObject requestBody = new JsonObject();
-        String prompt2 = prompt.replaceAll("\r?\n", " ").replaceAll("\s+", " ");
-        requestBody.add("text", new JsonPrimitive(prompt2));
-        requestBody.add("model", new JsonPrimitive("gpt-4o"));
-        requestBody.add("streaming", new JsonPrimitive(false));
-        JsonArray history = new JsonArray();
-        requestBody.add("history", history);
-        String jsonBody = new com.google.gson.Gson().toJson(requestBody);
-        //logger.info("发送的请求内容: " + jsonBody);
-        CloseableHttpClient client = HttpClients.createDefault();
-        HttpPost request = new HttpPost(endpoint);
-        request.setHeader("Content-Type", "application/json");
-        request.setEntity(new StringEntity(jsonBody,"UTF-8"));
-
-        try (CloseableHttpResponse response = client.execute(request)) {
-            int statusCode = response.getStatusLine().getStatusCode();
-            if (statusCode != 200) {
-                throw new IOException("请求失败: " + statusCode);
+        try {
+            if (conversationId == null || conversationId.isEmpty()) {
+                conversationId = generateSHA256HashFromJadx();
             }
-            HttpEntity entity = response.getEntity();
-            return EntityUtils.toString(entity, "UTF-8");
+            String endpoint = String.format(LLM_ENDPOINT, conversationId);
+            JsonObject requestBody = new JsonObject();
+            String prompt2 = prompt.replaceAll("\r?\n", " ").replaceAll("\s+", " ");
+            requestBody.add("text", new JsonPrimitive(prompt2));
+            requestBody.add("model", new JsonPrimitive("gpt-4o"));
+            requestBody.add("streaming", new JsonPrimitive(false));
+            JsonArray history = new JsonArray();
+            requestBody.add("history", history);
+            String jsonBody = new com.google.gson.Gson().toJson(requestBody);
+            //logger.info("发送的请求内容: " + jsonBody);
+            CloseableHttpClient client = HttpClients.createDefault();
+            HttpPost request = new HttpPost(endpoint);
+            request.setHeader("Content-Type", "application/json");
+            request.setEntity(new StringEntity(jsonBody,"UTF-8"));
+
+            try (CloseableHttpResponse response = client.execute(request)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                if (statusCode != 200) {
+                    throw new IOException("请求失败: " + statusCode);
+                }
+                HttpEntity entity = response.getEntity();
+                return EntityUtils.toString(entity, "UTF-8");
+            }
+        } catch (Exception e) {
+            throw new IOException("请求失败: " + e.getMessage(), e);
         }
-    } catch (Exception e) {
-        throw new IOException("请求失败: " + e.getMessage(), e);
     }
-}
 
     public void applyRenaming2(String jsonResponse, JavaClass currentClass) throws DecodeException {
-        logger.info("回答的内容: " + jsonResponse);
+        logger.info("回答的内容: {}", jsonResponse);
         JsonObject json = JsonParser.parseString(jsonResponse).getAsJsonObject();
         JsonObject classRenames = json.getAsJsonObject("class_renames");
 
@@ -238,7 +216,7 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
             // 重命名类
             ClassNode classNode = currentClass.getClassNode();
             classNode.rename(newClassName);
-            logger.info("类重命名 从: " + oldClassName + " 到: " + newClassName + " 作用描述：" + classDescription);
+            logger.info("类重命名 从: {} 到: {} 作用描述：{}", oldClassName, newClassName, classDescription);
             // 重命名字段
             JsonObject fields = classInfo.getAsJsonObject("fields");
             for (JavaField field : currentClass.getFields()) {
@@ -250,7 +228,7 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
                     FieldNode fieldNode = field.getFieldNode();
                     fieldNode.rename(newFieldName);
                     guiContext.applyNodeRename(fieldNode);
-                    logger.info("类 变量重命名 从: " + oldFieldName + " 到: " + newFieldName + " 作用描述：" + fieldDescription);
+                    logger.info("类 变量重命名 从: {} 到: {} 作用描述：{}", oldFieldName, newFieldName, fieldDescription);
                 }
             }
             // 重命名方法及其参数和局部变量
@@ -258,13 +236,13 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
             for (JavaMethod method : currentClass.getMethods()) {
                 String oldMethodName = method.getName();
                 if (oldMethodName!=null && methods.has(oldMethodName)) {
-                    
+
                     JsonObject methodInfo = methods.getAsJsonObject(oldMethodName);
                     String newMethodName = methodInfo.get("new_name").getAsString();
                     String methodDescription = methodInfo.get("description").getAsString();
                     MethodNode methodNode = method.getMethodNode();
-                    logger.info("函数重命名 从: " + oldMethodName + " 到: " + newMethodName + " 作用描述：" + methodDescription);
-                     // 重命名参数
+                    logger.info("函数重命名 从: {} 到: {} 作用描述：{}", oldMethodName, newMethodName, methodDescription);
+                    // 重命名参数
                     JsonObject parameters = methodInfo.getAsJsonObject("parameters");
                     if (parameters != null) {
                         List<VarNode> argNodes = methodNode.collectArgNodes();
@@ -276,7 +254,7 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
                                 String ArgNameDescription = methodInfo.get("description").getAsString();
                                 varNode.setName(newArgName);
                                 guiContext.applyNodeRename(varNode);
-                                logger.info("函数（"+newMethodName +"）的参数重命名 从: " + oldArgName + " 到: " + newArgName + " 作用描述：" + ArgNameDescription);
+                                logger.info("函数（{}）的参数重命名 从: {} 到: {} 作用描述：{}", newMethodName, oldArgName, newArgName, ArgNameDescription);
                             }
                         }
                     }
@@ -288,7 +266,7 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
                             String newVarName = varInfo.get("new_name").getAsString();
                             String varDescription = varInfo.get("description").getAsString();
                             // 记录日志而不是实际重命名
-                            logger.info("函数（"+newMethodName +"）的局部变量建议重命名 从: " + oldVarName + " 到: " + newVarName + " 作用描述：" + varDescription);
+                            logger.info("函数（{}）的局部变量建议重命名 从: {} 到: {} 作用描述：{}", newMethodName, oldVarName, newVarName, varDescription);
                         }
                     }
                     methodNode.rename(newMethodName);
@@ -300,7 +278,7 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
             guiContext.applyNodeRename(classNode);
         }
     }
-    
+
     private void showError(String message) {
         SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(null, message, "Error", JOptionPane.ERROR_MESSAGE));
     }
