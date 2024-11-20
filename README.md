@@ -4,7 +4,7 @@ hzhuAi is a plugin for the [JadX](https://github.com/skylot/jadx) decompiler tha
 
 ## Features
 
-- **LLM Integration**: Supports GPT-4 (NOt tested, but should support: Claude, and custom LLMs as well).
+- **LLM Integration**: Supports Ai.
 - **Code Analysis**: Analyze Java code for functionality, security issues, and notable patterns.
 - **Custom Prompts**: Configure custom prompts for analysis.
 - **GUI Integration**: Integrates with JadX GUI for easy access.
@@ -21,8 +21,8 @@ hzhuAi is a plugin for the [JadX](https://github.com/skylot/jadx) decompiler tha
 
 1. **Clone the repository**:
     ```sh
-    git clone https://github.com/samanl33t/jadx-xvision-plugin.git
-    cd jadx-xvision-plugin
+    git clone https://github.com/dooker520/Jadx-hzhuAi-Plugin.git
+    cd Jadx-hzhuAi-Plugin
     ```
 
 2. **Build the plugin**:
@@ -46,30 +46,8 @@ hzhuAi is a plugin for the [JadX](https://github.com/skylot/jadx) decompiler tha
 
 1. **Open JadX GUI**.
 2. **Load a Java archive (JAR) file**.
-3. **Right-click on a class or method** and select **Analyze with xVision Plugin**.
+3. **Right-click on a class or method** and select **Analyze with hzhuAi Plugin**.
 
-!JadX GUI
-
-### Configuration
-
-1. **Open the plugin settings**:
-    - For `jadx-cli`: Edit the configuration file located at `~/.jadx/plugins/xvision-plugin.properties`.
-    - For `jadx-gui`: Go to **Preferences** > **Plugins** > **xVision Plugin**.
-
-2. **Set the API Key and LLM Type**:
-    ```properties
-    xvision-plugin.apiKey=your-api-key
-    xvision-plugin.llmType=GPT-4
-    xvision-plugin.customEndpoint=https://your-custom-endpoint.com
-    ```
-
-!Plugin Settings
-
-### Custom Prompts
-
-1. **Select a code block** in JadX GUI.
-2. **Right-click** and choose **Analyze with xVision Plugin**.
-3. **Configure the analysis prompt** in the dialog that appears.
 
 ## Contributing
 
