@@ -7,26 +7,28 @@ import com.google.gson.JsonPrimitive;
 
 import jadx.api.*;
 import jadx.api.data.CommentStyle;
-import jadx.api.metadata.ICodeNodeRef;
 import jadx.api.metadata.annotations.VarNode;
 import jadx.api.plugins.JadxPlugin;
 import jadx.api.plugins.JadxPluginContext;
 import jadx.api.plugins.JadxPluginInfo;
 import jadx.api.plugins.JadxPluginInfoBuilder;
 import jadx.api.plugins.gui.JadxGuiContext;
-import jadx.api.plugins.input.data.IDebugInfo;
-import jadx.core.dex.instructions.args.CodeVar;
-import jadx.core.dex.instructions.args.RegisterArg;
-import jadx.core.dex.instructions.args.SSAVar;
 import jadx.core.dex.nodes.ClassNode;
 import jadx.core.dex.nodes.FieldNode;
 import jadx.core.dex.nodes.MethodNode;
 import jadx.core.utils.exceptions.DecodeException;
+
+import javax.naming.Context;
 import javax.swing.*;
 import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
+
+import jadx.plugins.hzhuAi.data.ClassRenameData;
+import jadx.plugins.hzhuAi.data.MethodRenameData;
+import jadx.plugins.hzhuAi.data.RenameData;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
@@ -37,13 +39,13 @@ import org.apache.http.util.EntityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
+public class hzhuAiPlugin implements JadxPlugin {
     private static final String PLUGIN_NAME = "hzhuAi Plugin";
     private static final String LLM_ENDPOINT = "http://43.156.23.54:6004/sse2?conversationId=%s";  // 只保留你给出的API
-    private static final Logger logger = LoggerFactory.getLogger(hzhuAiPlugin.class);
-
+    public static final Logger logger = LoggerFactory.getLogger(hzhuAiPlugin.class);
+    private final RenameData renameData = new RenameData();
     private static final String DEFAULT_PROMPT_TEMPLATE = """
-        你是一个 Java 代码分析专家，请分析以下代码，并为混淆后的类名、方法名、变量名、参数名提供新的描述性名称，以及加上详细的注释。
+        你是一个 Java 代码分析专家，请分析以下代码，并为混淆后的类名、方法名、变量名、参数名提供新的描述性名称，以及加上详细的中文注释。
         返回的格式为如下标准的 JSON 内容，不需要给出多余的解释：
         {
         "class_renames": {
@@ -59,11 +61,10 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
             "methods": {
                 "oldMethodName": {
                 "new_name": "newMethodName",
-                "description": "这是方法的描述",
+                "description": "这是方法的描述包含传参值的说明",
                 "parameters": {
                     "oldParamName": {
                     "new_name": "newParamName",
-                    "description": "这是参数的描述"
                     }
                 },
                 "local_variables": {
@@ -80,6 +81,7 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
         代码：
         """;
     private JadxGuiContext guiContext;
+    private JadxPluginContext Context;
     private String conversationId;
     private JadxDecompiler decompiler;
 
@@ -95,11 +97,23 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
     @Override
     public void init(JadxPluginContext context) {
         if (context.getGuiContext() != null) {
+            context.addPass(new BulkRenamePass(renameData));
             this.guiContext = context.getGuiContext();
             this.decompiler =context.getDecompiler();
+            this.Context = context;
             initializeGUIComponents();
         }
     }
+
+    private void reloadCode(JadxPluginContext context, JadxGuiContext guiContext) {
+        JadxDecompiler decompiler = context.getDecompiler();
+        renameData.getClsRenames().keySet().stream()
+                .map(decompiler::searchJavaClassByOrigFullName)
+                .filter(Objects::nonNull) // better to throw an error in class not found
+                .forEach(JavaClass::unload);
+        guiContext.reloadAllTabs();
+    }
+
 
     private void initializeGUIComponents() {
         // 使用 addPopupMenuAction 方法添加一个动态启用的菜单项
@@ -113,6 +127,7 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
             try {
                 JavaNode javaNode = decompiler.getJavaNodeByRef(node);
                 if (javaNode instanceof JavaClass) {
+                    logger.info("正在处理中.....");
                     analyzeCode((JavaClass) javaNode);
                 } else {
                     showError("请将光标置于类内进行分析");
@@ -136,7 +151,8 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
             protected void done() {
                 try {
                     String response = get();
-                    applyRenaming2(response, javaClass);
+                    applyRenaming(response, javaClass);
+                    reloadCode(Context, guiContext);
                     showAnalysisResult("处理完毕!");
                 } catch (Exception e) {
                     handleError("分析代码时出错" + e.getMessage(), e);
@@ -202,7 +218,9 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
         }
     }
 
-    public void applyRenaming2(String jsonResponse, JavaClass currentClass) throws DecodeException {
+    public void applyRenaming(String jsonResponse, JavaClass currentClass) throws DecodeException {
+        // mthData.getParamNames().add("jadxStr"); //参数名
+
         logger.info("回答的内容: {}", jsonResponse);
         JsonObject json = JsonParser.parseString(jsonResponse).getAsJsonObject();
         JsonObject classRenames = json.getAsJsonObject("class_renames");
@@ -214,34 +232,32 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
             String newClassName = classInfo.get("new_name").getAsString();
             String classDescription = classInfo.get("description").getAsString();
             // 重命名类
-            ClassNode classNode = currentClass.getClassNode();
-            classNode.rename(newClassName);
-            logger.info("类重命名 从: {} 到: {} 作用描述：{}", oldClassName, newClassName, classDescription);
+            ClassRenameData clsRenameData = new ClassRenameData(newClassName, classDescription); //新的类名
+            renameData.getClsRenames().put(oldClassName, clsRenameData);          //旧的类名
+
             // 重命名字段
             JsonObject fields = classInfo.getAsJsonObject("fields");
             for (JavaField field : currentClass.getFields()) {
                 String oldFieldName = field.getName();
-                if (oldFieldName!=null &&  fields.has(oldFieldName)) {
+                if (oldFieldName != null && fields.has(oldFieldName)) {
                     JsonObject fieldInfo = fields.getAsJsonObject(oldFieldName);
                     String newFieldName = fieldInfo.get("new_name").getAsString();
                     String fieldDescription = fieldInfo.get("description").getAsString();
-                    FieldNode fieldNode = field.getFieldNode();
-                    fieldNode.rename(newFieldName);
-                    guiContext.applyNodeRename(fieldNode);
-                    logger.info("类 变量重命名 从: {} 到: {} 作用描述：{}", oldFieldName, newFieldName, fieldDescription);
+                    clsRenameData.getFldNames().put(oldFieldName, new String[]{newFieldName, fieldDescription});
+
                 }
             }
             // 重命名方法及其参数和局部变量
             JsonObject methods = classInfo.getAsJsonObject("methods");
             for (JavaMethod method : currentClass.getMethods()) {
                 String oldMethodName = method.getName();
-                if (oldMethodName!=null && methods.has(oldMethodName)) {
-
+                if (oldMethodName != null && methods.has(oldMethodName)) {
                     JsonObject methodInfo = methods.getAsJsonObject(oldMethodName);
                     String newMethodName = methodInfo.get("new_name").getAsString();
                     String methodDescription = methodInfo.get("description").getAsString();
                     MethodNode methodNode = method.getMethodNode();
-                    logger.info("函数重命名 从: {} 到: {} 作用描述：{}", oldMethodName, newMethodName, methodDescription);
+                    MethodRenameData mthData = new MethodRenameData(newMethodName, methodDescription); //新的函数名 和注释
+
                     // 重命名参数
                     JsonObject parameters = methodInfo.getAsJsonObject("parameters");
                     if (parameters != null) {
@@ -251,10 +267,10 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
                             if (parameters.has(oldArgName)) {
                                 JsonObject paramInfo = parameters.getAsJsonObject(oldArgName);
                                 String newArgName = paramInfo.get("new_name").getAsString();
-                                String ArgNameDescription = methodInfo.get("description").getAsString();
+                                mthData.getParamNames().put(oldArgName, newArgName);
                                 varNode.setName(newArgName);
                                 guiContext.applyNodeRename(varNode);
-                                logger.info("函数（{}）的参数重命名 从: {} 到: {} 作用描述：{}", newMethodName, oldArgName, newArgName, ArgNameDescription);
+                                logger.info("函数（{}）的参数重命名 从: {} 到: {}", oldMethodName, oldArgName, newArgName);
                             }
                         }
                     }
@@ -269,16 +285,13 @@ public class hzhuAiPlugin<JavaParameter> implements JadxPlugin {
                             logger.info("函数（{}）的局部变量建议重命名 从: {} 到: {} 作用描述：{}", newMethodName, oldVarName, newVarName, varDescription);
                         }
                     }
-                    methodNode.rename(newMethodName);
-                    methodNode.addCodeComment(methodDescription, CommentStyle.BLOCK);
-                    guiContext.applyNodeRename(methodNode);
+
+                    clsRenameData.getMthData().put(oldMethodName, mthData); //旧的函数名
                 }
+
             }
-            classNode.addCodeComment(classDescription, CommentStyle.BLOCK);
-            guiContext.applyNodeRename(classNode);
         }
     }
-
     private void showError(String message) {
         SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(null, message, "Error", JOptionPane.ERROR_MESSAGE));
     }
