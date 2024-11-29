@@ -71,30 +71,30 @@ public class hzhuAiPlugin implements JadxPlugin {
         """;
 
     private static final String DEFAULT_PROMPT_TEMPLATE = """
-        你是一个 Java 代码分析专家，请分析以下代码，并为混淆后的类名、方法名、变量名、参数名提供新的描述性名称，以及加上详细的中文注释。
+        你是一个 Java 代码分析专家，请分析以下代码，并为混淆后的类名、类初始化的传参名、方法名、参数名提供新的描述性名称，以及加上详细的中文注释。
         返回的格式为如下标准的 JSON 内容 要注意重复的函数名只保留参数最多的那个，不需要给出多余的解释：
-            {
-            	"className": "NewClassName",
-            	"description": "类的描述 \\n 新参数名1：描述 \\n 新参数名2：描述",
-            	"fields": [
-            		{
-            			"name": "newName",
-            			"description": "字段的描述"
-            		}
-            	],
-                "parameters": [
-                   "newParamName"
-                ],
-            	"methods": {
-            		"oldName":{
-            			"name": "newName",
-            			"description": "方法的描述 \\n 新参数名1：描述 \\n 新参数名2：描述 ",
-            			"parameters": [
-            				"newParamName"
-            			]
-            		}
-            	}
+        {
+            "className": "NewClassName",
+            "description": "类的描述 \\n 新参数名1：描述 \\n 新参数名2：描述",
+            "fields": [
+                {
+                    "name": "newName",
+                    "description": "字段的描述"
+                }
+            ],
+            "parameters": [
+                "新参数名"
+            ],
+            "methods": {
+                "oldName": {
+                    "name": "newName",
+                    "description": "方法的描述 \\n 新参数名1：描述 \\n 新参数名2：描述 ",
+                    "parameters": [
+                        "newParamName"
+                    ]
+                }
             }
+        }
         代码：
         """;
 
