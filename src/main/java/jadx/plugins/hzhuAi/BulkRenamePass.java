@@ -1,24 +1,20 @@
 package jadx.plugins.hzhuAi;
 
-import com.google.gson.JsonObject;
-import jadx.api.metadata.annotations.VarNode;
+import jadx.api.data.CommentStyle;
 import jadx.api.plugins.pass.JadxPassInfo;
 import jadx.api.plugins.pass.impl.OrderedJadxPassInfo;
 import jadx.api.plugins.pass.types.JadxDecompilePass;
 import jadx.core.dex.instructions.args.RegisterArg;
-import jadx.core.dex.instructions.args.SSAVar;
 import jadx.core.dex.nodes.ClassNode;
 import jadx.core.dex.nodes.FieldNode;
 import jadx.core.dex.nodes.MethodNode;
 import jadx.core.dex.nodes.RootNode;
 import jadx.plugins.hzhuAi.data.ClassRenameData;
-import jadx.plugins.hzhuAi.data.MethodRenameData;
 import jadx.plugins.hzhuAi.data.RenameData;
 
 import java.util.List;
 import java.util.Map;
-
-import static jadx.plugins.hzhuAi.hzhuAiPlugin.logger;
+import java.util.Objects;
 
 public class BulkRenamePass implements JadxDecompilePass {
 
@@ -44,51 +40,86 @@ public class BulkRenamePass implements JadxDecompilePass {
     public boolean visit(ClassNode cls) {
         String clsFullName = cls.getName();
         ClassRenameData clsRenameData = renameData.getClsRenames().get(clsFullName);
+        boolean isSetCodeComment = false;
+
         if (clsRenameData != null) {
-            logger.info("类重命名 从: {} 到: {} 作用描述：{}", clsFullName, clsRenameData.getClsNewName(), clsRenameData.getCodeComment());
-            cls.rename(clsRenameData.getClsNewName());
-            cls.addCodeComment(clsRenameData.getCodeComment());
+            //logger.info("类重命名 从: {} 到: {} 作用描述：{}", clsFullName, clsRenameData.getClassName(), clsRenameData.getDescription());
+            cls.rename(clsRenameData.getClassName());
             // rename fields
-            Map<String, Object> fldNames = clsRenameData.getFldNames();
+            List<ClassRenameData.Field> Fields = clsRenameData.getFields();
+            int fieldIndex =0;
             for (FieldNode field : cls.getFields()) {
-                String[] newName = (String[]) fldNames.get(field.getName());
-                if (newName != null) {
-                    field.rename(newName[0]);
-                    field.addCodeComment(newName[1]);
-                    logger.info("类 字段重命名 从: {} 到: {} 作用描述：{}", field.getName(),newName[0], newName[1]);
+                if (Fields.size()>=fieldIndex+1) {
+                    ClassRenameData.Field fieldInfo = Fields.get(fieldIndex);
+                    fieldIndex++;
+                    field.rename(fieldInfo.getName());
+                    field.addCodeComment( fieldInfo.getDescription());
+                    isSetCodeComment = true;
+                    //logger.info("类 字段重命名 从: {} 到: {} 作用描述：{}", field.getName(),fieldInfo.getName(), fieldInfo.getDescription());
                 }
             }
-
             // rename methods
-            Map<String, MethodRenameData> mthData = clsRenameData.getMthData();
+            Map<String, ClassRenameData.Method> methods =clsRenameData.getMethods();
             for (MethodNode method : cls.getMethods()) {
-                MethodRenameData mthRenameData = mthData.get(method.getName());
-                if (mthRenameData != null) {
-                    method.rename(mthRenameData.getNewName());
-                    method.addCodeComment(mthRenameData.getCodeComment());
-                    logger.info("函数重命名 从: {} 到: {} 作用描述：{}", method.getName(), mthRenameData.getNewName(), mthRenameData.getCodeComment());
-                    // rename method parameters
-
-                    // todo An error will be reported here
-//                    Map<String, String> paramNames = mthRenameData.getParamNames();
-//                    List<VarNode> argNodes = method.collectArgNodes();
-//                    for (VarNode varNode : argNodes) {
-//                        String oldArgName = varNode.getName();
-//                        String newName = paramNames.get(oldArgName);
-//                        if(newName!=null) {
-//                            logger.info("函数（{}）的参数重命名 从: {} 到: {}", method.getName(),oldArgName, newName);
-//                            varNode.setName(newName);
+                String methodFullName = method.getName();
+                //logger.info("函数名 {}", method.getName());
+                    if (Objects.equals(methodFullName, "<init>")){
+                        // rename init ClassMethod  Parameters
+                        List<String> InitParameters = clsRenameData.getParameters();
+                        if(InitParameters!=null){
+                            List<RegisterArg> registerArgs = method.getArgRegs();
+                            int InitParameterIndex = 0 ;
+                            for (RegisterArg arg : registerArgs) {
+                                if (InitParameters.size()>=InitParameterIndex+1){
+                                    String newParamName =  InitParameters.get(InitParameterIndex);
+                                    if(newParamName!=null){
+                                        //logger.info("初始化类函数 {} 修改参数  {}  ", methodFullName, newParamName);
+                                        arg.setName(newParamName);
+                                    }
+                                }
+                                InitParameterIndex++;
+                            }
+                        }
+                        method.addCodeComment(clsRenameData.getClassName() + "\n" +clsRenameData.getDescription(),CommentStyle.JAVADOC);
+                    }else{
+                        ClassRenameData.Method methodInfo = methods.get(methodFullName);
+                        if (methodInfo != null) {
+                            // rename method Parameters
+                            List<String> Parameters = methodInfo.getParameters();
+                            List<RegisterArg> registerArgs = method.getArgRegs();
+                            int ParameterIndex = 0 ;
+                            for (RegisterArg arg : registerArgs) {
+                                if (Parameters.size()>=ParameterIndex+1){
+                                    String newParamName =  Parameters.get(ParameterIndex);
+                                    if(newParamName!=null){
+                                        //logger.info("函数 {} 修改参数  {}  ", methodInfo.getName(), newParamName);
+                                        arg.setName(newParamName);
+                                    }
+                                }
+                                ParameterIndex++;
+                            }
+                            method.rename(methodInfo.getName());
+                            method.addCodeComment(methodInfo.getName()+ "\n" + methodInfo.getDescription(),CommentStyle.JAVADOC);
+                    }
+                        // todo Features not yet implemented
+//                    ArrayList<String[]> LocalVars = mthRenameData.getLocalVars();
+//                    for (String[] var : LocalVars) {
+//                        if (var.length>=2){
+//                            logger.info("函数 {} 修改变量  {} 作用描述:{}  ", method.getName(),var[0], var[1]);
 //                        }
 //                    }
+                    }
+            }
 
-                    // todo Features not yet implemented
-                    // method.getLocals();///?
+            if (!isSetCodeComment) {
+                cls.addCodeComment(clsRenameData.getClassName()+ "\n" + clsRenameData.getDescription(),CommentStyle.JAVADOC);
 
-                }
             }
         }
         return true;
     }
+
+
 
     @Override
     public void visit(MethodNode mth) {

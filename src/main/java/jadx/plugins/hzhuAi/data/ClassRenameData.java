@@ -1,34 +1,66 @@
 package jadx.plugins.hzhuAi.data;
 
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class ClassRenameData {
-    private final String clsNewName;
-    private final String CodeComment;
-    private Map<String, Object> fldNames = new HashMap<>();
-    private Map<String, MethodRenameData> mthData = new HashMap<>();
+    private String className;
+    private String description;
+    private List<Field> fields;
+    private List<String> parameters;
+    private Map<String, Method> methods;
 
-
-    public ClassRenameData(String clsNewName,String codeComment) {
-        this.clsNewName = clsNewName;
-        this.CodeComment = codeComment;
+    // Getters
+    public String getClassName() {
+        return className;
     }
 
-    public String getClsNewName() {
-        return clsNewName;
+    public String getDescription() {
+        return description;
     }
 
-    public String getCodeComment() {
-        return CodeComment;
+    public List<Field> getFields() {
+        return fields;
     }
 
-
-    public Map<String, Object> getFldNames() {
-        return fldNames;
+    public List<String> getParameters() {
+        return parameters;
     }
 
-    public Map<String, MethodRenameData> getMthData() {
-        return mthData;
+    public Map<String, Method> getMethods() {
+        return methods;
+    }
+
+    public static class Field {
+        private String name;
+        private String description;
+
+        // Getters
+        public String getName() {
+            return name;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+    }
+
+    public static class Method {
+        private String name;
+        private String description;
+        private List<String> parameters;
+
+        // Getters
+        public String getName() {
+            return name;
+        }
+
+        public String getDescription() {
+            return description;
+        }
+
+        public List<String> getParameters() {
+            return parameters;
+        }
     }
 }

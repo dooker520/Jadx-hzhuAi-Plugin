@@ -29,7 +29,6 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.11.2")
 
     implementation ("com.google.code.gson:gson:2.8.9")
-
     implementation("org.apache.httpcomponents:httpclient:4.5.14")
 
 }
