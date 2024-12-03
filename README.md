@@ -54,8 +54,6 @@ hzhuAi is a plugin for the [JadX](https://github.com/skylot/jadx) decompiler tha
 
 1. **The temporary variable list cannot be obtained through the function because I don’t know how to modify the variable name.**
 
-2. **No response after modifying the comment**
-
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request on GitHub.
