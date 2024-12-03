@@ -9,6 +9,8 @@ import jadx.core.dex.nodes.ClassNode;
 import jadx.core.dex.nodes.FieldNode;
 import jadx.core.dex.nodes.MethodNode;
 import jadx.core.dex.nodes.RootNode;
+import jadx.core.dex.visitors.ssa.SSATransform;
+import jadx.core.utils.exceptions.JadxException;
 import jadx.plugins.hzhuAi.data.ClassRenameData;
 import jadx.plugins.hzhuAi.data.RenameData;
 
@@ -29,7 +31,8 @@ public class BulkRenamePass implements JadxDecompilePass {
         return new OrderedJadxPassInfo(
                 "BulkRename",
                 "Rename everything")
-                .after("FinishTypeInference");
+                .after("FinishTypeInference")
+                .after("SSATransform");
     }
 
     @Override
@@ -62,45 +65,53 @@ public class BulkRenamePass implements JadxDecompilePass {
             Map<String, ClassRenameData.Method> methods =clsRenameData.getMethods();
             for (MethodNode method : cls.getMethods()) {
                 String methodFullName = method.getName();
+
+                // 确保 SSA 变量已被优化
+                SSATransform ssaTransform = new SSATransform();
+                try {
+                    ssaTransform.visit(method);
+                } catch (JadxException e) {
+                    throw new RuntimeException(e);
+                }
                 //logger.info("函数名 {}", method.getName());
-                    if (Objects.equals(methodFullName, "<init>")){
-                        // rename init ClassMethod  Parameters
-                        List<String> InitParameters = clsRenameData.getParameters();
-                        if(InitParameters!=null){
-                            List<RegisterArg> registerArgs = method.getArgRegs();
-                            int InitParameterIndex = 0 ;
-                            for (RegisterArg arg : registerArgs) {
-                                if (InitParameters.size()>=InitParameterIndex+1){
-                                    String newParamName =  InitParameters.get(InitParameterIndex);
-                                    if(newParamName!=null){
-                                        //logger.info("初始化类函数 {} 修改参数  {}  ", methodFullName, newParamName);
-                                        arg.setName(newParamName);
-                                    }
+                if (Objects.equals(methodFullName, "<init>")){
+                    // rename init ClassMethod  Parameters
+                    List<String> InitParameters = clsRenameData.getParameters();
+                    if(InitParameters!=null){
+                        List<RegisterArg> registerArgs = method.getArgRegs();
+                        int InitParameterIndex = 0 ;
+                        for (RegisterArg arg : registerArgs) {
+                            if (InitParameters.size()>=InitParameterIndex+1){
+                                String newParamName =  InitParameters.get(InitParameterIndex);
+                                if(newParamName!=null){
+                                    //logger.info("初始化类函数 {} 修改参数  {}  ", methodFullName, newParamName);
+                                    arg.setName(newParamName);
                                 }
-                                InitParameterIndex++;
                             }
+                            InitParameterIndex++;
                         }
-                        method.addCodeComment(clsRenameData.getClassName() + "\n" +clsRenameData.getDescription(),CommentStyle.JAVADOC);
-                    }else{
-                        ClassRenameData.Method methodInfo = methods.get(methodFullName);
-                        if (methodInfo != null) {
-                            // rename method Parameters
-                            List<String> Parameters = methodInfo.getParameters();
-                            List<RegisterArg> registerArgs = method.getArgRegs();
-                            int ParameterIndex = 0 ;
-                            for (RegisterArg arg : registerArgs) {
-                                if (Parameters.size()>=ParameterIndex+1){
-                                    String newParamName =  Parameters.get(ParameterIndex);
-                                    if(newParamName!=null){
-                                        //logger.info("函数 {} 修改参数  {}  ", methodInfo.getName(), newParamName);
-                                        arg.setName(newParamName);
-                                    }
-                                }
-                                ParameterIndex++;
-                            }
-                            method.rename(methodInfo.getName());
-                            method.addCodeComment(methodInfo.getName()+ "\n" + methodInfo.getDescription(),CommentStyle.JAVADOC);
                     }
+                    method.addCodeComment(clsRenameData.getClassName() + "\n" +clsRenameData.getDescription(),CommentStyle.JAVADOC);
+                }else{
+                    ClassRenameData.Method methodInfo = methods.get(methodFullName);
+                    if (methodInfo != null) {
+                        // rename method Parameters
+                        List<String> Parameters = methodInfo.getParameters();
+                        List<RegisterArg> registerArgs = method.getArgRegs();
+                        int ParameterIndex = 0 ;
+                        for (RegisterArg arg : registerArgs) {
+                            if (Parameters.size()>=ParameterIndex+1){
+                                String newParamName =  Parameters.get(ParameterIndex);
+                                if(newParamName!=null){
+                                    //logger.info("函数 {} 修改参数  {}  ", methodInfo.getName(), newParamName);
+                                    arg.setName(newParamName);
+                                }
+                            }
+                            ParameterIndex++;
+                        }
+                        method.rename(methodInfo.getName());
+                        method.addCodeComment(methodInfo.getName()+ "\n" + methodInfo.getDescription(),CommentStyle.JAVADOC);
+                }
                         // todo Features not yet implemented
 //                    ArrayList<String[]> LocalVars = mthRenameData.getLocalVars();
 //                    for (String[] var : LocalVars) {
@@ -118,6 +129,8 @@ public class BulkRenamePass implements JadxDecompilePass {
         }
         return true;
     }
+
+
 
 
 

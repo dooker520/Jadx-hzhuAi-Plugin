@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import jadx.api.JadxDecompiler;
 import jadx.api.JavaClass;
+import jadx.api.JavaMethod;
 import jadx.api.JavaNode;
 import jadx.api.plugins.JadxPlugin;
 import jadx.api.plugins.JadxPluginContext;
@@ -25,7 +26,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
+import java.awt.*;
+import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
 import java.util.Objects;
 import java.util.Random;
@@ -35,41 +42,6 @@ public class hzhuAiPlugin implements JadxPlugin {
     private static final String LLM_ENDPOINT = "http://43.156.23.54:6004/sse2?conversationId=%s";  // 只保留你给出的API
     public static final Logger logger = LoggerFactory.getLogger(hzhuAiPlugin.class);
     private final RenameData renameData = new RenameData();
-    private static final String DEFAULT_PROMPT_TEMPLATE_bak = """
-        你是一个 Java 代码分析专家，请分析以下代码，并为混淆后的类名、方法名、变量名、参数名提供新的描述性名称，以及加上详细的中文注释。
-        返回的格式为如下标准的 JSON 内容，不需要给出多余的解释：
-        {
-            "class_renames": {
-                "OldClassName": {
-                    "new_name": "NewClassName",
-                    "description": "这是类的描述",
-                    "fields": {
-                        "oldFieldName": {
-                            "new_name": "newFieldName",
-                            "description": "这是字段的描述"
-                        }
-                    },
-                    "methods": {
-                        "oldMethodName": {
-                            "new_name": "newMethodName",
-                            "description": "这是方法的描述包含传参值的说明",
-                            "parameters": [
-                                "newParamName",
-                            ],
-                            "local_variables": [
-                                [
-                                    "newVarName",
-                                    "这是局部变量的描述"
-                                ]
-                            ]
-                        }
-                    }
-                }
-            }
-         }
-        代码：
-        """;
-
     private static final String DEFAULT_PROMPT_TEMPLATE = """
         你是一个 Java 代码分析专家，请分析以下代码，并为混淆后的类名、类初始化的传参名、方法名、参数名提供新的描述性名称，以及加上详细的中文注释。
         返回的格式为如下标准的 JSON 内容 要注意重复的函数名只保留参数最多的那个，不需要给出多余的解释：
@@ -132,28 +104,100 @@ public class hzhuAiPlugin implements JadxPlugin {
         guiContext.reloadAllTabs();
     }
 
-
     private void initializeGUIComponents() {
-        // 使用 addPopupMenuAction 方法添加一个动态启用的菜单项
-        guiContext.addPopupMenuAction("AI去混淆", (node) -> {
-            if (node != null) {
-                JavaNode javaNode = decompiler.getJavaNodeByRef(node);
-                return javaNode instanceof JavaClass;
-            }
-            return false;
-        }, null, (node) -> {
-            try {
-                JavaNode javaNode = decompiler.getJavaNodeByRef(node);
-                if (javaNode instanceof JavaClass) {
-                    logger.info("正在处理中.....");
-                    analyzeCode((JavaClass) javaNode);
-                } else {
-                    showError("请将光标置于类内进行分析");
-                }
-            } catch (Exception ex) {
-                handleError("获取代码失败", ex);
-            }
-        });
+        // 添加 "AI去混淆" 菜单项，绑定快捷键 F8
+        guiContext.addPopupMenuAction("AI去混淆",
+                (node) -> node != null && decompiler.getJavaNodeByRef(node) instanceof JavaClass,
+                "F8", // 这里是快捷键绑定
+                (node) -> {
+                    try {
+                        JavaNode javaNode = decompiler.getJavaNodeByRef(node);
+                        if (javaNode instanceof JavaClass) {
+                            logger.info("正在处理中.....");
+                            analyzeCode((JavaClass) javaNode);
+                        } else {
+                            showError("请将光标置于类内进行分析");
+                        }
+                    } catch (Exception ex) {
+                        handleError("获取代码失败", ex);
+                    }
+                });
+
+        // 添加 "AI to Android" 菜单项，绑定快捷键 F9
+        guiContext.addPopupMenuAction("AI to Android",
+                (node) -> node != null && decompiler.getJavaNodeByRef(node) instanceof JavaMethod,
+                "F9", // 这里是快捷键绑定
+                (node) -> {
+                    try {
+                        JavaNode javaNode = decompiler.getJavaNodeByRef(node);
+                        if (javaNode instanceof JavaMethod methodClass) {
+                            String code = loadConversionResult(methodClass.getTopParentClass().getFullName() + "." + methodClass.getName());
+                            if (code != null) {
+                                logger.info("正在处理中.....");
+                                String smaliCode = optimizeSmali(methodClass);
+                                code = convertSmaliToJava(smaliCode);
+                            }
+                            saveConversionResult(code, methodClass.getTopParentClass().getFullName() + "." + methodClass.getName());
+                            showAnalysisResult(code);
+                        } else {
+                            showError("请将光标置于类内进行分析");
+                        }
+                    } catch (Exception ex) {
+                        handleError("获取代码失败", ex);
+                    }
+                });
+    }
+
+
+
+    private String convertSmaliToJava(String smaliCode) throws IOException, InterruptedException {
+        String prompt = "请将以下Smali函数代码转换为Android代码，给出详细的中文注释，除了Android代码其他都不需要：\n" + smaliCode;
+        return sendLLMRequest(prompt);
+    }
+
+    private static String optimizeSmali(JavaMethod javaMethod) {
+        // 提取方法的 smali 代码
+        String smaliCode = extractSmali(javaMethod);
+        if (smaliCode.isEmpty()) {
+            return "";
+        }
+        // 优化：移除 .line 指令
+        smaliCode = smaliCode.replaceAll("\\.line \\d+", "");
+        String cleaned = smaliCode.replace("\t", " ");
+        // Remove leading spaces (indentation) from each line
+        cleaned = cleaned.replaceAll("(?m)^\\s+", "");
+        // Replace multiple newlines with a single newline
+        cleaned = cleaned.replaceAll("\\n+", "\n");
+        // Trim leading and trailing whitespace from the entire text
+        cleaned = cleaned.trim();
+        // 可以根据需要在此处添加更多优化
+
+        return cleaned;
+    }
+
+    private static String extractSmali(JavaMethod javaMethod) {
+        JavaClass javaClass = javaMethod.getDeclaringClass();
+        String smaliCode = javaClass.getSmali();
+        String methodDescriptor = javaMethod.getMethodNode().getMethodInfo().getShortId();
+
+        // 构建方法的完整签名
+        String methodSignature = ".method " + javaMethod.getAccessFlags().makeString(true)  + methodDescriptor;
+
+        // 查找方法在smali代码中的起始位置
+        int methodStartIndex = smaliCode.indexOf(methodSignature);
+        if (methodStartIndex == -1) {
+            logger.error("在 smali 中未找到方法签名: " + methodSignature);
+            return "";
+        }
+
+        // 查找方法在smali代码中的结束位置
+        int methodEndIndex = smaliCode.indexOf(".end method", methodStartIndex);
+        if (methodEndIndex == -1) {
+            logger.error("未找到方法的结束标记: " + methodSignature);
+            return "";
+        }
+        // 提取方法的smali代码
+        return smaliCode.substring(methodStartIndex, methodEndIndex + ".end method".length());
     }
 
 
@@ -252,7 +296,41 @@ public class hzhuAiPlugin implements JadxPlugin {
     }
 
     private void showAnalysisResult(String analysis) {
-        JOptionPane.showMessageDialog(null, analysis, "结果", JOptionPane.INFORMATION_MESSAGE);
+        JTextArea textArea = new JTextArea(analysis);
+        textArea.setEditable(false);
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        scrollPane.setPreferredSize(new Dimension(800, 600));
+
+        JDialog dialog = new JDialog((Frame) null, "Ai Android", false); // 设置为非模态对话框
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dialog.getContentPane().add(scrollPane);
+        dialog.pack();
+        dialog.setLocationRelativeTo(null); // 窗口居中
+        dialog.setResizable(true); // 允许改变大小
+        dialog.setVisible(true);
+    }
+
+
+
+    private void saveConversionResult(String result, String className) throws IOException {
+        // 将完全限定名转换为目录路径
+        String directoryPath = className.replace('.', File.separatorChar);
+        Path filePath = Paths.get("ai_results", directoryPath + ".java");
+        logger.info("Saving result to: {}", filePath);
+
+        // 创建父目录
+        Files.createDirectories(filePath.getParent());
+        Files.writeString(filePath, result);
+    }
+
+    private String loadConversionResult(String className) throws IOException {
+        String directoryPath = className.replace('.', File.separatorChar);
+        Path filePath = Paths.get("ai_results", directoryPath + ".java");
+
+        if (Files.exists(filePath)) {
+            return Files.readString(filePath, StandardCharsets.UTF_8);
+        }
+        return null;
     }
 
 }
