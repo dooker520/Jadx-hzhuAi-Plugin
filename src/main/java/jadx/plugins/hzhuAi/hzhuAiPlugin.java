@@ -8,6 +8,7 @@ import jadx.api.JadxDecompiler;
 import jadx.api.JavaClass;
 import jadx.api.JavaMethod;
 import jadx.api.JavaNode;
+import jadx.api.metadata.ICodeNodeRef;
 import jadx.api.plugins.JadxPlugin;
 import jadx.api.plugins.JadxPluginContext;
 import jadx.api.plugins.JadxPluginInfo;
@@ -127,25 +128,20 @@ public class hzhuAiPlugin implements JadxPlugin {
         guiContext.addPopupMenuAction("AI to Android",
                 (node) -> node != null && decompiler.getJavaNodeByRef(node) instanceof JavaMethod,
                 "F9", // 这里是快捷键绑定
+                this::accept);
+        // 添加 "AI to Android" 菜单项，绑定快捷键 F10
+        guiContext.addPopupMenuAction("Remove AI to Android",
                 (node) -> {
-                    try {
-                        JavaNode javaNode = decompiler.getJavaNodeByRef(node);
+                    JavaNode javaNode = decompiler.getJavaNodeByRef(node);
+                    if (node != null){
                         if (javaNode instanceof JavaMethod methodClass) {
-                            String code = loadConversionResult(methodClass.getTopParentClass().getFullName() + "." + methodClass.getName());
-                            if (code != null) {
-                                logger.info("正在处理中.....");
-                                String smaliCode = optimizeSmali(methodClass);
-                                code = convertSmaliToJava(smaliCode);
-                            }
-                            saveConversionResult(code, methodClass.getTopParentClass().getFullName() + "." + methodClass.getName());
-                            showAnalysisResult(code);
-                        } else {
-                            showError("请将光标置于类内进行分析");
+                            return loadConversionResultExit(methodClass.getTopParentClass().getPackage(),methodClass.getTopParentClass().getFullName() + "." + methodClass.getName());
                         }
-                    } catch (Exception ex) {
-                        handleError("获取代码失败", ex);
                     }
-                });
+                    return false;
+                },
+                "F10", // 这里是快捷键绑定
+                this::Remove);
     }
 
 
@@ -186,14 +182,14 @@ public class hzhuAiPlugin implements JadxPlugin {
         // 查找方法在smali代码中的起始位置
         int methodStartIndex = smaliCode.indexOf(methodSignature);
         if (methodStartIndex == -1) {
-            logger.error("在 smali 中未找到方法签名: " + methodSignature);
+            logger.error("在 smali 中未找到方法签名: {}", methodSignature);
             return "";
         }
 
         // 查找方法在smali代码中的结束位置
         int methodEndIndex = smaliCode.indexOf(".end method", methodStartIndex);
         if (methodEndIndex == -1) {
-            logger.error("未找到方法的结束标记: " + methodSignature);
+            logger.error("未找到方法的结束标记: {}", methodSignature);
             return "";
         }
         // 提取方法的smali代码
@@ -280,6 +276,62 @@ public class hzhuAiPlugin implements JadxPlugin {
         }
     }
 
+
+    private String sendLLMRequestV2(String prompt) throws IOException {
+        try {
+            // 创建请求体
+            JsonObject requestBody = new JsonObject();
+            JsonArray messages = new JsonArray();
+
+            // 添加消息内容
+            JsonObject systemMessage = new JsonObject();
+            systemMessage.add("role", new JsonPrimitive("system"));
+            systemMessage.add("content", new JsonPrimitive("你是一个代码分析专家"));
+            messages.add(systemMessage);
+
+            JsonObject userMessage = new JsonObject();
+            userMessage.add("role", new JsonPrimitive("user"));
+            userMessage.add("content", new JsonPrimitive(prompt));
+            messages.add(userMessage);
+
+            requestBody.add("messages", messages);
+            requestBody.add("model", new JsonPrimitive("deepseek-chat"));
+            requestBody.add("stream", new JsonPrimitive(false));
+
+            String jsonBody = new com.google.gson.Gson().toJson(requestBody);
+
+            // 创建HTTP客户端
+            try (CloseableHttpClient client = HttpClients.createDefault()) {
+                HttpPost request = new HttpPost("https://api.deepseek.com/chat/completions");
+
+                request.setHeader("Content-Type", "application/json");
+                request.setHeader("Authorization", "Bearer sk-a79164e6df1d456d8e736ca56cbd430c"); // 替换为你的API密钥
+                request.setEntity(new StringEntity(jsonBody, "UTF-8"));
+
+                // 执行请求并返回响应
+                try (CloseableHttpResponse response = client.execute(request)) {
+                    int statusCode = response.getStatusLine().getStatusCode();
+                    if (statusCode != 200) {
+                        logger.info("请求失败1: {}", statusCode);
+                        throw new IOException("请求失败: " + statusCode);
+                    }
+                    HttpEntity entity = response.getEntity();
+                    return EntityUtils.toString(entity, "UTF-8");
+                }catch (Exception e) {
+                    logger.info("请求失败2: {}", e.getMessage(), e);
+                    throw new RuntimeException(e);
+                }
+            } catch (Exception e) {
+                logger.info("请求失败3: {}", e.getMessage(), e);
+                throw new RuntimeException(e);
+            }
+        } catch (Exception e) {
+            logger.info("请求失败4: {}", e.getMessage(), e);
+            throw new IOException("请求失败: " + e.getMessage(), e);
+        }
+    }
+
+
     public void applyRenaming(String jsonResponse, JavaClass currentClass){
         logger.info(jsonResponse);
         Gson gson = new Gson();
@@ -312,20 +364,20 @@ public class hzhuAiPlugin implements JadxPlugin {
 
 
 
-    private void saveConversionResult(String result, String className) throws IOException {
+    private void saveConversionResult(String Package,String result, String className) throws IOException {
         // 将完全限定名转换为目录路径
         String directoryPath = className.replace('.', File.separatorChar);
-        Path filePath = Paths.get("ai_results", directoryPath + ".java");
+        Path filePath = Paths.get(Package, directoryPath + ".java");
         logger.info("Saving result to: {}", filePath);
 
         // 创建父目录
-        Files.createDirectories(filePath.getParent());
+        Files.createDirectories( filePath.getParent());
         Files.writeString(filePath, result);
     }
 
-    private String loadConversionResult(String className) throws IOException {
+    private String loadConversionResult(String Package,String className) throws IOException {
         String directoryPath = className.replace('.', File.separatorChar);
-        Path filePath = Paths.get("ai_results", directoryPath + ".java");
+        Path filePath = Paths.get(Package,   directoryPath + ".java");
 
         if (Files.exists(filePath)) {
             return Files.readString(filePath, StandardCharsets.UTF_8);
@@ -333,4 +385,59 @@ public class hzhuAiPlugin implements JadxPlugin {
         return null;
     }
 
+    private boolean loadConversionResultExit(String Package,String className) {
+        String directoryPath = className.replace('.', File.separatorChar);
+        Path filePath = Paths.get(Package,   directoryPath + ".java");
+        return Files.exists(filePath);
+    }
+
+    private boolean loadConversionResultRemove(String Package,String className) {
+        String directoryPath = className.replace('.', File.separatorChar);
+        Path filePath = Paths.get(Package,   directoryPath + ".java");
+        try {
+            Files.delete(filePath);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return true;
+    }
+
+
+    private void accept(ICodeNodeRef node) {
+        try {
+            JavaNode javaNode = decompiler.getJavaNodeByRef(node);
+            if (javaNode instanceof JavaMethod methodClass) {
+                String code = loadConversionResult(methodClass.getTopParentClass().getPackage(), methodClass.getTopParentClass().getFullName() + "." + methodClass.getName());
+                if (code == null) {
+                    logger.info("正在处理中.....");
+                    String smaliCode = optimizeSmali(methodClass);
+                    code = convertSmaliToJava(smaliCode);
+                    saveConversionResult(methodClass.getTopParentClass().getPackage(), code, methodClass.getTopParentClass().getFullName() + "." + methodClass.getName());
+                }
+                if (code != null) {
+                    showAnalysisResult(code);
+                } else {
+                    logger.info("获取代码失败");
+                }
+            } else {
+                showError("请将光标置于函数内进行分析");
+            }
+        } catch (Exception ex) {
+            handleError("获取代码失败", ex);
+        }
+    }
+
+    private void Remove(ICodeNodeRef node) {
+        try {
+            JavaNode javaNode = decompiler.getJavaNodeByRef(node);
+            if (javaNode instanceof JavaMethod methodClass) {
+                loadConversionResultRemove(methodClass.getTopParentClass().getPackage(), methodClass.getTopParentClass().getFullName() + "." + methodClass.getName());
+
+            } else {
+                showError("请将光标置于函数内操作");
+            }
+        } catch (Exception ex) {
+            handleError("操作失败", ex);
+        }
+    }
 }

@@ -8,6 +8,7 @@ hzhuAi is a plugin for the [JadX](https://github.com/skylot/jadx) decompiler tha
 - **Code Analysis**: Analyze Java code for functionality, security issues, and notable patterns.
 - **Custom Prompts**: Configure custom prompts for analysis.
 - **GUI Integration**: Integrates with JadX GUI for easy access.
+
 ## Screenshots
 
 ## Installation
